@@ -1,0 +1,424 @@
+local AutoExecuteCode = [[
+-- BEN HUB V23 - AUTO SAVE & RECONNECT 
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+local LocalPlayer = Players.LocalPlayer
+
+local BossList = {"black cell", "future boss", "doctor boss", "galaxy boss", "granolah", "moro", "black frieza", "black buu"}
+local ZeniBossList = {"zeno", "zeno zama", "zenozama", "king zeno"}
+local LootList = {"chest", "cofre", "money", "zeni", "cash", "coins", "loot", "item", "box"}
+
+local FixedDragonBallCoords = {
+    Vector3.new(120, 15, -450),
+    Vector3.new(-850, 45, 1200),
+    Vector3.new(450, 20, 850),
+    Vector3.new(-300, 10, -900),
+    Vector3.new(900, 35, -200),
+    Vector3.new(-600, 50, 500),
+    Vector3.new(0, 25, 0)
+}
+
+local Config = {
+    Delay = 0.3,
+    SkillDelay = 1.5,
+    ZenkaiAmount = 10,
+    Skills = {Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six, Enum.KeyCode.Seven, Enum.KeyCode.Eight},
+    CustomSkills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V, Enum.KeyCode.G}
+}
+
+local Flags = {
+    AutoFarmBoss = false,
+    AutoZeni = false,
+    AutoLockBoss = false,
+    AutoClick = false,
+    AutoSkills = false,
+    AutoCustomSkills = false,
+    AutoRetry = true,
+    AutoZenkai = false,
+    AutoChest = true,
+    AutoDragonBalls = false
+}
+
+-------------------------------------------------
+-- SISTEMA DE GUARDADO (JSON)
+-------------------------------------------------
+local FolderName = "BenHubConfig"
+local FileName = FolderName .. "/settings.json"
+
+if isfolder and not isfolder(FolderName) then
+    makefolder(FolderName)
+end
+
+local function SaveSettings()
+    if writefile then
+        local dataToSave = {
+            SavedFlags = Flags,
+            SavedSkillDelay = Config.SkillDelay,
+            SavedZenkaiAmount = Config.ZenkaiAmount
+        }
+        local json = HttpService:JSONEncode(dataToSave)
+        writefile(FileName, json)
+    end
+end
+
+local function LoadSettings()
+    if isfile and isfile(FileName) and readfile then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(FileName))
+        end)
+        if success and result then
+            if result.SavedFlags then
+                for k, v in pairs(result.SavedFlags) do
+                    Flags[k] = v
+                end
+            end
+            if result.SavedSkillDelay then Config.SkillDelay = result.SavedSkillDelay end
+            if result.SavedZenkaiAmount then Config.ZenkaiAmount = result.SavedZenkaiAmount end
+        end
+    end
+end
+
+-- Cargar configuración antes de iniciar todo
+LoadSettings()
+
+local ZenkaiCount = 0
+
+-------------------------------------------------
+-- FUNCIONES BASE
+-------------------------------------------------
+local function pressKey(keyCode)
+    VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+    task.wait(0.1)
+    VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+end
+
+local function clickMouse()
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+end
+
+local function forceClick(obj)
+    if obj and obj.AbsolutePosition and obj.AbsoluteSize then
+        local pos = obj.AbsolutePosition + (obj.AbsoluteSize / 2)
+        VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y + 36, 0, true, game, 1)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y + 36, 0, false, game, 1)
+    end
+end
+
+-------------------------------------------------
+-- HABILIDADES
+-------------------------------------------------
+task.spawn(function()
+    while true do
+        task.wait(Config.SkillDelay)
+        if Flags.AutoFarmBoss or Flags.AutoZeni then
+            if Flags.AutoSkills then
+                for _, key in ipairs(Config.Skills) do
+                    if not (Flags.AutoFarmBoss or Flags.AutoZeni) or not Flags.AutoSkills then break end
+                    pressKey(key)
+                    task.wait(Config.SkillDelay)
+                end
+            end
+            if Flags.AutoCustomSkills then
+                for _, key in ipairs(Config.CustomSkills) do
+                    if not (Flags.AutoFarmBoss or Flags.AutoZeni) or not Flags.AutoCustomSkills then break end
+                    pressKey(key)
+                    task.wait(Config.SkillDelay)
+                end
+            end
+        end
+    end
+end)
+
+-------------------------------------------------
+-- AUTO REPLY / REINTENTAR
+-------------------------------------------------
+local function executeAutoReply()
+    if not Flags.AutoRetry then return end
+    for _, parent in ipairs({LocalPlayer.PlayerGui, CoreGui}) do
+        for _, obj in ipairs(parent:GetDescendants()) do
+            if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Visible then
+                local text = (obj:IsA("TextButton") and obj.Text or ""):lower()
+                local name = obj.Name:lower()
+
+                if text:find("retry") or name:find("retry") or 
+                   text:find("replay") or name:find("replay") or 
+                   text:find("rematch") or name:find("rematch") or 
+                   text:find("luchar") or name:find("luchar") or 
+                   text:find("again") or name:find("again") or 
+                   text:find("recoger") or text:find("siguiente") or text:find("ready") then
+                    
+                    forceClick(obj)
+                    pcall(function()
+                        for _, conn in ipairs(getconnections(obj.MouseButton1Click)) do conn:Fire() end
+                        for _, conn in ipairs(getconnections(obj.Activated)) do conn:Fire() end
+                    end)
+                    task.wait(0.5)
+                end
+            end
+        end
+    end
+end
+
+-------------------------------------------------
+-- COFRES Y LOOT
+-------------------------------------------------
+local function autoGrabChests(hrp)
+    if not Flags.AutoChest then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") or obj:IsA("Model") or obj:IsA("ProximityPrompt") then
+            local name = obj.Name:lower()
+            for _, lootName in ipairs(LootList) do
+                if name:find(lootName) then
+                    local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true) or (obj.Parent and obj.Parent:IsA("BasePart") and obj.Parent or nil)
+                    if part and (hrp.Position - part.Position).Magnitude < 40 then
+                        local prompt = obj:IsA("ProximityPrompt") and obj or part:FindFirstChildWhichIsA("ProximityPrompt", true) or (obj.Parent and obj.Parent:FindFirstChildWhichIsA("ProximityPrompt", true))
+                        if prompt then fireproximityprompt(prompt) end
+                        pressKey(Enum.KeyCode.F)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-------------------------------------------------
+-- ESFERAS DEL DRAGÓN
+-------------------------------------------------
+local function getDragonBallTarget()
+    for _, v in ipairs(workspace:GetDescendants()) do
+        local n = v.Name:lower()
+        if n:find("star") or n:find("dragon") or n:find("esfera") or n:find("ball") then
+            local p = v:IsA("BasePart") and v or v:FindFirstChildWhichIsA("BasePart", true)
+            if p then return p, v end
+        end
+    end
+    return nil, nil
+end
+
+local function executeUltraFastTP(hrp)
+    local targetPart, parentObj = getDragonBallTarget()
+    if targetPart then
+        hrp.CFrame = targetPart.CFrame + Vector3.new(0, 1.5, 0)
+        task.wait(0.05)
+        local prompt = (parentObj and parentObj:FindFirstChildWhichIsA("ProximityPrompt", true)) or targetPart:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt then fireproximityprompt(prompt) end
+        pressKey(Enum.KeyCode.F)
+        return true
+    else
+        for _, pos in ipairs(FixedDragonBallCoords) do
+            if not Flags.AutoDragonBalls then break end
+            hrp.CFrame = CFrame.new(pos)
+            task.wait(0.12)
+            local foundPart, foundObj = getDragonBallTarget()
+            if foundPart then
+                hrp.CFrame = foundPart.CFrame + Vector3.new(0, 1.5, 0)
+                task.wait(0.05)
+                local prompt = (foundObj and foundObj:FindFirstChildWhichIsA("ProximityPrompt", true)) or foundPart:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt then fireproximityprompt(prompt) end
+                pressKey(Enum.KeyCode.F)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-------------------------------------------------
+-- BUCLE PRINCIPAL
+-------------------------------------------------
+task.spawn(function()
+    local isTransformed = false
+    while true do
+        task.wait(Config.Delay)
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+        executeAutoReply()
+
+        if hrp then
+            autoGrabChests(hrp)
+
+            if Flags.AutoDragonBalls then
+                executeUltraFastTP(hrp)
+            end
+
+            if Flags.AutoZenkai and ZenkaiCount < Config.ZenkaiAmount then
+                for _, parent in ipairs({LocalPlayer.PlayerGui, CoreGui}) do
+                    for _, obj in ipairs(parent:GetDescendants()) do
+                        if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Visible then
+                            local text = (obj:IsA("TextButton") and obj.Text or ""):lower()
+                            local name = obj.Name:lower()
+                            if text:find("zenkai") or name:find("zenkai") or text:find("rebirth") or name:find("rebirth") or text:find("renacer") then
+                                forceClick(obj)
+                                ZenkaiCount = ZenkaiCount + 1
+                                task.wait(1)
+                                if ZenkaiCount >= Config.ZenkaiAmount then Flags.AutoZenkai = false end
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+
+            local currentTargetList = nil
+            if Flags.AutoZeni then currentTargetList = ZeniBossList
+            elseif Flags.AutoFarmBoss then currentTargetList = BossList end
+
+            if currentTargetList then
+                local boss = nil
+                for _, v in ipairs(workspace:GetDescendants()) do
+                    if v:IsA("Model") then
+                        local name = v.Name:lower()
+                        for _, t in ipairs(currentTargetList) do
+                            if name:find(t) then
+                                local hum = v:FindFirstChildOfClass("Humanoid")
+                                if hum and hum.Health > 0 then 
+                                    boss = v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso") or v:FindFirstChild("UpperTorso")
+                                    break 
+                                end
+                            end
+                        end
+                    end
+                    if boss then break end
+                end
+                
+                if boss then
+                    if not isTransformed then 
+                        pressKey(Enum.KeyCode.B)
+                        task.wait(1)
+                        isTransformed = true 
+                    end
+                    
+                    hrp.CFrame = boss.CFrame * CFrame.new(0, 0, 3)
+                    
+                    if Flags.AutoLockBoss then pressKey(Enum.KeyCode.F) end
+                    if Flags.AutoClick then pressKey(Enum.KeyCode.E); clickMouse() end
+                else
+                    isTransformed = false
+                end
+            end
+        end
+    end
+end)
+
+-------------------------------------------------
+-- INTERFAZ GRÁFICA
+-------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui", CoreGui)
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 480, 0, 470)
+MainFrame.Position = UDim2.new(0.5, -240, 0.5, -235)
+MainFrame.BackgroundColor3 = Color3.fromRGB(12, 20, 12)
+MainFrame.Active = true; MainFrame.Draggable = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+local UIStroke = Instance.new("UIStroke", MainFrame); UIStroke.Thickness = 2
+
+local OpenBtn = Instance.new("TextButton", ScreenGui)
+OpenBtn.Size = UDim2.new(0, 50, 0, 50); OpenBtn.Position = UDim2.new(0.02, 0, 0.4, 0)
+OpenBtn.Text = "BEN"; OpenBtn.BackgroundColor3 = Color3.fromRGB(18, 40, 18); OpenBtn.TextColor3 = Color3.fromRGB(0, 255, 120)
+OpenBtn.TextSize = 14; OpenBtn.Font = Enum.Font.SourceSansBold; OpenBtn.Visible = false; OpenBtn.Active = true; OpenBtn.Draggable = true
+Instance.new("UICorner", OpenBtn).CornerRadius = UDim.new(1, 0)
+local OpenStroke = Instance.new("UIStroke", OpenBtn); OpenStroke.Thickness = 2; OpenStroke.Color = Color3.fromRGB(0, 255, 120)
+
+local MinimizeBtn = Instance.new("TextButton", MainFrame)
+MinimizeBtn.Size = UDim2.new(0, 30, 0, 30); MinimizeBtn.Position = UDim2.new(1, -70, 0, 5)
+MinimizeBtn.Text = "-"; MinimizeBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 40); MinimizeBtn.TextColor3 = Color3.new(1, 1, 1); MinimizeBtn.TextSize = 20
+Instance.new("UICorner", MinimizeBtn)
+
+local CloseBtn = Instance.new("TextButton", MainFrame)
+CloseBtn.Size = UDim2.new(0, 30, 0, 30); CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.Text = "X"; CloseBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30); CloseBtn.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", CloseBtn)
+
+MinimizeBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false; OpenBtn.Visible = true end)
+OpenBtn.MouseButton1Click:Connect(function() MainFrame.Visible = true; OpenBtn.Visible = false end)
+
+local ConfirmFrame = Instance.new("Frame", ScreenGui)
+ConfirmFrame.Size = UDim2.new(0, 200, 0, 100); ConfirmFrame.Position = UDim2.new(0.5, -100, 0.5, -50)
+ConfirmFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20); ConfirmFrame.Visible = false
+Instance.new("UICorner", ConfirmFrame)
+local ConfText = Instance.new("TextLabel", ConfirmFrame); ConfText.Size = UDim2.new(1, 0, 0.5, 0); ConfText.Text = "¿Cerrar Script?"; ConfText.TextColor3 = Color3.new(1,1,1); ConfText.BackgroundTransparency = 1
+local YesBtn = Instance.new("TextButton", ConfirmFrame); YesBtn.Size = UDim2.new(0.4, 0, 0.4, 0); YesBtn.Position = UDim2.new(0.05, 0, 0.5, 0); YesBtn.Text = "SI"
+local NoBtn = Instance.new("TextButton", ConfirmFrame); NoBtn.Size = UDim2.new(0.4, 0, 0.4, 0); NoBtn.Position = UDim2.new(0.55, 0, 0.5, 0); NoBtn.Text = "NO"
+
+CloseBtn.MouseButton1Click:Connect(function() ConfirmFrame.Visible = true end)
+YesBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+NoBtn.MouseButton1Click:Connect(function() ConfirmFrame.Visible = false end)
+
+local Content = Instance.new("ScrollingFrame", MainFrame)
+Content.Size = UDim2.new(1, -20, 1, -90); Content.Position = UDim2.new(0, 10, 0, 40)
+Content.BackgroundTransparency = 1; Instance.new("UIListLayout", Content).Padding = UDim.new(0, 8)
+
+local function createToggle(title, flagName)
+    local Row = Instance.new("Frame", Content)
+    Row.Size = UDim2.new(1, 0, 0, 35); Row.BackgroundColor3 = Color3.fromRGB(18, 30, 18)
+    Instance.new("UICorner", Row).CornerRadius = UDim.new(0, 6)
+    local Label = Instance.new("TextLabel", Row)
+    Label.Size = UDim2.new(0.7, 0, 1, 0); Label.Text = "  " .. title; Label.BackgroundTransparency = 1
+    Label.TextColor3 = Color3.fromRGB(220, 255, 220)
+    
+    local Btn = Instance.new("TextButton", Row)
+    Btn.Size = UDim2.new(0, 50, 0, 20); Btn.Position = UDim2.new(1, -60, 0.5, -10)
+    -- Ajustar color según el estado cargado al inicio
+    Btn.Text = Flags[flagName] and "ON" or "OFF"
+    Btn.BackgroundColor3 = Flags[flagName] and Color3.fromRGB(0, 200, 80) or Color3.fromRGB(180, 50, 50)
+    Instance.new("UICorner", Btn)
+    
+    Btn.MouseButton1Click:Connect(function()
+        Flags[flagName] = not Flags[flagName]
+        if flagName == "AutoZenkai" and Flags.AutoZenkai then ZenkaiCount = 0 end
+        Btn.Text = Flags[flagName] and "ON" or "OFF"
+        Btn.BackgroundColor3 = Flags[flagName] and Color3.fromRGB(0, 200, 80) or Color3.fromRGB(180, 50, 50)
+        SaveSettings() -- Se guarda cada vez que haces click
+    end)
+end
+
+local ZenkaiBox = Instance.new("TextBox", MainFrame)
+ZenkaiBox.Size = UDim2.new(0.42, 0, 0, 30); ZenkaiBox.Position = UDim2.new(0.05, 0, 1, -40)
+ZenkaiBox.PlaceholderText = "Cant. Zenkai"; ZenkaiBox.Text = tostring(Config.ZenkaiAmount)
+ZenkaiBox.BackgroundColor3 = Color3.fromRGB(18, 30, 18); ZenkaiBox.TextColor3 = Color3.new(1,1,1)
+Instance.new("UICorner", ZenkaiBox)
+ZenkaiBox.FocusLost:Connect(function() 
+    Config.ZenkaiAmount = tonumber(ZenkaiBox.Text) or 10; 
+    ZenkaiCount = 0
+    SaveSettings() -- Guardar al editar
+end)
+
+local SpeedBox = Instance.new("TextBox", MainFrame)
+SpeedBox.Size = UDim2.new(0.42, 0, 0, 30); SpeedBox.Position = UDim2.new(0.53, 0, 1, -40)
+SpeedBox.PlaceholderText = "Delay Skill (s)"; SpeedBox.Text = tostring(Config.SkillDelay)
+SpeedBox.BackgroundColor3 = Color3.fromRGB(18, 30, 18); SpeedBox.TextColor3 = Color3.new(1,1,1)
+Instance.new("UICorner", SpeedBox)
+SpeedBox.FocusLost:Connect(function() 
+    Config.SkillDelay = tonumber(SpeedBox.Text) or 1.5 
+    SaveSettings() -- Guardar al editar
+end)
+
+createToggle("Auto Farm Boss", "AutoFarmBoss")
+createToggle("Auto Zeni (Zeno Zama)", "AutoZeni")
+createToggle("Auto Grab Chests / Loot [F]", "AutoChest")
+createToggle("Auto Lock Boss", "AutoLockBoss")
+createToggle("Auto Click [E]", "AutoClick")
+createToggle("Auto Skills (1-8)", "AutoSkills")
+createToggle("Auto Ráfaga/Especiales (Z,X,C,V,G)", "AutoCustomSkills")
+createToggle("Auto Reply / Reintentar", "AutoRetry")
+createToggle("Auto Zenkai", "AutoZenkai")
+createToggle("Auto TP Dragon Balls (Instant / Sin Lag)", "AutoDragonBalls")
+
+RunService.RenderStepped:Connect(function()
+    local hue = 0.28 + (math.sin(tick() * 3) * 0.08)
+    UIStroke.Color = Color3.fromHSV(hue, 0.9, 1)
+end)
+]]
+
+local QueueOnTeleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport) or nil
+if QueueOnTeleport then
+    QueueOnTeleport(AutoExecuteCode)
+end
+
+loadstring(AutoExecuteCode)()
